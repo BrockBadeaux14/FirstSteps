@@ -16,6 +16,8 @@ MIN_PASSING_EPISODES = 8  # out of 10
 # Gait checks (an automated stand-in for watching the video).
 MIN_ALTERNATION = 0.8  # share of consecutive touchdowns made by the other foot
 MIN_TOUCHDOWNS_PER_FOOT = 3
+MAX_DUTY_IMBALANCE = 0.1  # |right - left| share of time on the ground (limping)
+MAX_FOOT_SLIP = 1.0  # m/s, mean sliding speed of grounded feet (dragging, skating)
 MIN_AIR_STEPS = 2  # a foot must be off the floor this many control steps to count a touchdown
 
 
@@ -124,6 +126,7 @@ def gait_metrics(
       "flight_fraction": round(float(np.mean(~c[:, 0] & ~c[:, 1])), 3),
       "double_support_fraction": round(float(np.mean(c[:, 0] & c[:, 1])), 3),
       "duty_factor": {"right": round(float(c[:, 0].mean()), 3), "left": round(float(c[:, 1].mean()), 3)},
+      "duty_imbalance": round(float(abs(c[:, 0].mean() - c[:, 1].mean())), 3),
       "foot_slip_mps": round(float(np.mean(slip)), 3) if slip else 0.0,
       "min_knee_height_m": round(float(knee_z.min()), 3),
   }
@@ -159,6 +162,8 @@ def evaluate(env: sprint.Sprint, policy: Callable, num_episodes: int = 10, seed:
   gait_ok = all(
       e["gait"]["alternation"] >= MIN_ALTERNATION
       and min(e["gait"]["touchdowns"].values()) >= MIN_TOUCHDOWNS_PER_FOOT
+      and e["gait"]["duty_imbalance"] <= MAX_DUTY_IMBALANCE
+      and e["gait"]["foot_slip_mps"] <= MAX_FOOT_SLIP
       for e in episodes if not e["fell"]
   ) and any(not e["fell"] for e in episodes)
   distances = [e["distance_m"] for e in episodes]
@@ -175,12 +180,16 @@ def evaluate(env: sprint.Sprint, policy: Callable, num_episodes: int = 10, seed:
       "passed_episodes": passed,
       "distance_ok": passed >= MIN_PASSING_EPISODES,
       "mean_alternation": round(alternation, 3),
+      "mean_duty_imbalance": round(float(np.mean([e["gait"]["duty_imbalance"] for e in episodes])), 3),
+      "mean_foot_slip_mps": round(float(np.mean([e["gait"]["foot_slip_mps"] for e in episodes])), 3),
       "gait_ok": gait_ok,
       "criteria": {
           "min_distance_m": MIN_DISTANCE_M,
           "min_passing_episodes": MIN_PASSING_EPISODES,
           "min_alternation": MIN_ALTERNATION,
           "min_touchdowns_per_foot": MIN_TOUCHDOWNS_PER_FOOT,
+          "max_duty_imbalance": MAX_DUTY_IMBALANCE,
+          "max_foot_slip_mps": MAX_FOOT_SLIP,
       },
       "episodes": episodes,
       "_trajectories": traj,
@@ -198,5 +207,6 @@ def describe(result: dict[str, Any]) -> str:
       f"distance mean {d['mean']:.1f} m (min {d['min']:.1f}, max {d['max']:.1f}), "
       f"falls {result['falls']}, passed {result['passed_episodes']}/{result['num_episodes']} "
       f"(need {MIN_PASSING_EPISODES}), alternation {result['mean_alternation']:.2f}, "
+      f"stance imbalance {result['mean_duty_imbalance']:.2f}, slip {result['mean_foot_slip_mps']:.2f} m/s, "
       f"gait {'OK' if result['gait_ok'] else 'CHECK'}"
   )

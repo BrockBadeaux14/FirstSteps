@@ -132,8 +132,12 @@ class RewardWeights(_Block):
       description="Reward for landing on alternate feet; penalty for hopping on one foot.",
   )
   foot_slip: float = Field(
-      default=1.0, ge=0.0, le=10.0,
-      description="Penalty per m/s a grounded foot slides (stops dragging and skating).",
+      default=0.5, ge=0.0, le=10.0,
+      description="Penalty on the squared sliding speed of grounded feet (stops dragging).",
+  )
+  symmetry: float = Field(
+      default=5.0, ge=0.0, le=20.0,
+      description="Penalty when one foot spends more time on the ground than the other (limping).",
   )
 
 

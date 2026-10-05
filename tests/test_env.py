@@ -167,6 +167,24 @@ def test_alternation_term_rewards_running_and_penalizes_hopping():
   assert totals["tap_dance"] == 0.0  # steps too short to count
 
 
+def test_symmetry_term_flags_a_limp():
+  env = make_env()
+  t = np.arange(400)
+  patterns = {
+      "run": np.stack([(t % 20) < 5, ((t + 10) % 20) < 5], axis=1),
+      "limp": np.stack([(t % 20) < 9, ((t + 10) % 20) < 2], axis=1),
+  }
+  mean_imbalance = {}
+  for name, pattern in patterns.items():
+    avg, values = jp.full(2, 0.5), []
+    for down in pattern:
+      value, avg = env._contact_imbalance(avg, jp.array(down))  # pylint: disable=protected-access
+      values.append(float(value))
+    mean_imbalance[name] = np.mean(values[300:])  # after the averages settle
+  assert mean_imbalance["run"] < 0.05
+  assert mean_imbalance["limp"] > 0.3
+
+
 def test_gait_metrics_tell_running_from_hopping():
   dt = 0.025
   t = np.arange(200)
@@ -192,5 +210,5 @@ def test_foot_slip_penalizes_a_dragged_foot_only():
   moved = s0.replace(site_xpos=s0.site_xpos.at[:, 0].add(0.05))  # every site 5 cm forward
   down = jp.array([True, False])
   slip = float(env._foot_slip(s0, moved, down))  # pylint: disable=protected-access
-  assert np.isclose(slip, 0.05 / env.dt)  # only the grounded (right) foot counts
+  assert np.isclose(slip, (0.05 / env.dt) ** 2)  # only the grounded (right) foot counts
   assert float(env._foot_slip(s0, s0, jp.array([True, True]))) == 0.0  # pylint: disable=protected-access

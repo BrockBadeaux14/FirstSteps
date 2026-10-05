@@ -19,7 +19,8 @@ XML_PATH = Path(__file__).resolve().parents[1] / "assets" / "humanoid2d.xml"
 
 # Named reward terms, in a fixed order. Each one's weight is in config.reward_weights.
 REWARD_TERMS = (
-    "forward_velocity", "alive", "upright", "control_cost", "alternation", "foot_slip",
+    "forward_velocity", "alive", "upright", "control_cost",
+    "alternation", "foot_slip", "symmetry",
 )
 
 # Limb joints in qpos/qvel/actuator order (the three root joints come first).
@@ -78,6 +79,9 @@ def default_config() -> config_dict.ConfigDict:
       # and earns the full alternation bonus after full_step_air_time.
       min_step_air_time=0.1,  # s
       full_step_air_time=0.25,  # s
+      # Time constant of each foot's running-average ground contact (symmetry
+      # term). Long enough to smooth out the ripple within each stride.
+      contact_average_time=2.0,  # s
       reward_weights=config_dict.create(
           forward_velocity=1.0,
           alive=1.0,
@@ -85,6 +89,7 @@ def default_config() -> config_dict.ConfigDict:
           control_cost=1e-3,
           alternation=0.0,
           foot_slip=0.0,
+          symmetry=0.0,
       ),
   )
 
@@ -152,6 +157,7 @@ class Sprint(mjx_env.MjxEnv):
         "rng": rng,
         "last_foot": jp.array(-1, dtype=jp.int32),  # foot of the last step: 0 right, 1 left
         "air_time": jp.zeros(2),  # seconds each foot has been off the floor
+        "contact_avg": jp.full(2, 0.5),  # running-average ground contact of each foot
     }
     return mjx_env.State(data, obs, reward, done, metrics, info)
 
@@ -162,12 +168,14 @@ class Sprint(mjx_env.MjxEnv):
     first = state.data.time < 0.5 * self.sim_dt
     last_foot = jp.where(first, -1, state.info["last_foot"])
     air = jp.where(first, 0.0, state.info["air_time"])
+    contact_avg = jp.where(first, 0.5, state.info["contact_avg"])
     was_down = self.foot_contacts(state.data) > 0.5
 
     data = mjx_env.step(self.mjx_model, state.data, action, self.n_substeps)
     down = self.foot_contacts(data) > 0.5
     alternation, last_foot, air = self._alternation(was_down, down, air, last_foot)
     slip = self._foot_slip(state.data, data, down)
+    imbalance, contact_avg = self._contact_imbalance(contact_avg, down)
 
     dx = data.qpos[self._rootx] - state.data.qpos[self._rootx]
     velocity = dx / self.dt
@@ -191,6 +199,7 @@ class Sprint(mjx_env.MjxEnv):
         "control_cost": -jp.sum(jp.square(action)),
         "alternation": alternation,
         "foot_slip": -slip,
+        "symmetry": -imbalance,
     }
     rewards = {k: self._weights[k] * terms[k] for k in REWARD_TERMS}
     reward = sum(rewards.values())
@@ -209,7 +218,7 @@ class Sprint(mjx_env.MjxEnv):
         speed_per_step=dx / self.dt,  # Brax divides *_per_step metrics by episode length
         fell=done,
     )
-    info = {**state.info, "last_foot": last_foot, "air_time": air}
+    info = {**state.info, "last_foot": last_foot, "air_time": air, "contact_avg": contact_avg}
     return state.replace(
         data=data, obs=obs, reward=reward, done=done, metrics=metrics, info=info
     )
@@ -233,17 +242,28 @@ class Sprint(mjx_env.MjxEnv):
     air = jp.where(down, 0.0, air + self.dt)
     return value, last_foot, air
 
+  def _contact_imbalance(self, contact_avg: jax.Array, down: jax.Array):
+    """|right - left| of each foot's running-average ground contact.
+
+    A symmetric gait keeps both averages level; a limp (one foot planted far
+    longer than the other) pulls them apart.
+    """
+    rate = self.dt / self._config.contact_average_time
+    contact_avg = contact_avg + rate * (down.astype(jp.float32) - contact_avg)
+    return jp.abs(contact_avg[0] - contact_avg[1]), contact_avg
+
   def _foot_slip(self, data0: mjx.Data, data1: mjx.Data, down: jax.Array) -> jax.Array:
-    """Horizontal speed (m/s) of each grounded foot's lowest point, summed.
+    """Squared horizontal speed (m^2/s^2) of each grounded foot's lowest point, summed.
 
     A planted or rolling foot pivots about its lowest point, which stays put;
-    a foot dragged or skated along the floor moves.
+    a foot dragged or skated along the floor moves. Squaring keeps the small
+    slips of a landing cheap and makes a dragged toe (~6 m/s) expensive.
     """
     s0 = data0.site_xpos[self._foot_sites]  # (2 feet, heel/toe, xyz)
     s1 = data1.site_xpos[self._foot_sites]
     low = jp.argmin(s1[..., 2], axis=-1)  # lower site of each foot
     dx = jp.take_along_axis(s1[..., 0] - s0[..., 0], low[:, None], axis=-1)[:, 0]
-    return jp.sum(jp.where(down, jp.abs(dx), 0.0)) / self.dt
+    return jp.sum(jp.where(down, jp.square(dx / self.dt), 0.0))
 
   # ---------------------------------------------------------------------------
   # Helpers

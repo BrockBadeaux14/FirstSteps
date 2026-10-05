@@ -28,7 +28,8 @@
     "upright": 0.0,
     "control_cost": 0.001,
     "alternation": 5.0,
-    "foot_slip": 1.0
+    "foot_slip": 0.5,
+    "symmetry": 5.0
   },
   "sim": {
     "impl": "warp",
