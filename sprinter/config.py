@@ -127,6 +127,14 @@ class RewardWeights(_Block):
   control_cost: float = Field(
       default=1e-3, ge=0.0, le=1.0, description="Penalty on squared motor commands (energy)."
   )
+  alternation: float = Field(
+      default=5.0, ge=0.0, le=20.0,
+      description="Reward for landing on alternate feet; penalty for hopping on one foot.",
+  )
+  foot_slip: float = Field(
+      default=1.0, ge=0.0, le=10.0,
+      description="Penalty per m/s a grounded foot slides (stops dragging and skating).",
+  )
 
 
 class SimConfig(_Block):

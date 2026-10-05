@@ -26,7 +26,8 @@ def rollout(env: sprint.Sprint, policy: Callable, num_episodes: int, seed: int) 
     poses     (T+1, N, nbody-1, 3)  [x, z, angle] of every body except world
     qpos      (T+1, N, nq)          for rendering with MuJoCo
     contacts  (T+1, N, 2)           foot contact flags (right, left)
-    foot_x    (T+1, N, 2)           mean heel/toe x of each foot
+    site_x    (T+1, N, 2, 2)        heel/toe site x of each foot
+    site_z    (T+1, N, 2, 2)        heel/toe site z of each foot
     knee_z    (T+1, N, 2)           knee (shin frame) heights
     done      (T, N)                termination flag after each step
   Steps after an episode terminates keep simulating and should be ignored.
@@ -47,7 +48,8 @@ def rollout(env: sprint.Sprint, policy: Callable, num_episodes: int, seed: int) 
         "poses": poses,
         "qpos": d.qpos,
         "contacts": jax.vmap(env.foot_contacts)(d),
-        "foot_x": d.site_xpos[:, foot_sites, 0].mean(axis=-1),
+        "site_x": d.site_xpos[:, foot_sites, 0],
+        "site_z": d.site_xpos[:, foot_sites, 2],
         "knee_z": d.xpos[:, shins, 2],
     }
 
@@ -81,8 +83,13 @@ def episode_lengths(done: np.ndarray) -> np.ndarray:
   return np.where(hit.any(axis=0), hit.argmax(axis=0) + 1, T)
 
 
-def gait_metrics(contacts: np.ndarray, foot_x: np.ndarray, knee_z: np.ndarray, dt: float) -> dict[str, Any]:
-  """Gait statistics for one episode. Arrays cover only the frames while alive."""
+def gait_metrics(
+    contacts: np.ndarray, site_x: np.ndarray, site_z: np.ndarray, knee_z: np.ndarray, dt: float
+) -> dict[str, Any]:
+  """Gait statistics for one episode. Arrays cover only the frames while alive.
+
+  contacts (T, 2); site_x, site_z (T, 2 feet, heel/toe); knee_z (T, 2).
+  """
   c = contacts > 0.5  # (T, 2)
   events = []  # (frame, foot)
   for f in range(2):
@@ -105,11 +112,10 @@ def gait_metrics(contacts: np.ndarray, foot_x: np.ndarray, knee_z: np.ndarray, d
   pairs = list(zip(merged, merged[1:]))
   alternating = sum(1 for (_, f0), (_, f1) in pairs if f0 != f1 and 2 not in (f0, f1))
   n = [sum(1 for _, f in events if f == foot) for foot in range(2)]
-  slip = []
-  for f in range(2):
-    both = c[1:, f] & c[:-1, f]
-    if both.any():
-      slip.append(np.abs(np.diff(foot_x[:, f]))[both].mean() / dt)
+  # Same measure as the foot_slip reward term: speed of the grounded foot's lowest point.
+  low = np.argmin(site_z[1:], axis=-1)  # (T-1, 2)
+  dx = np.take_along_axis(np.diff(site_x, axis=0), low[..., None], axis=-1)[..., 0]
+  slip = [np.abs(dx[c[1:, f], f]).mean() / dt for f in range(2) if c[1:, f].any()]
   duration = max(len(c) - 1, 1) * dt
   return {
       "touchdowns": {"right": n[0], "left": n[1]},
@@ -134,8 +140,10 @@ def evaluate(env: sprint.Sprint, policy: Callable, num_episodes: int = 10, seed:
     fell = bool(traj["done"][L - 1, i] > 0.5)
     x = traj["poses"][:, i, 0, 0]  # torso x
     distance = float(x[L] - x[0])
+    alive = slice(0, L + 1)
     gait = gait_metrics(
-        traj["contacts"][: L + 1, i], traj["foot_x"][: L + 1, i], traj["knee_z"][: L + 1, i], dt
+        traj["contacts"][alive, i], traj["site_x"][alive, i], traj["site_z"][alive, i],
+        traj["knee_z"][alive, i], dt,
     )
     episodes.append({
         "episode": i,

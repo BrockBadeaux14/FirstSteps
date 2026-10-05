@@ -36,7 +36,10 @@ def test_reset_starts_standing_on_both_feet():
   assert state.obs.shape == (OBS_SIZE,) and env.observation_size == OBS_SIZE
   assert np.isfinite(np.asarray(state.obs)).all()
   assert 0.88 < float(state.data.xpos[env._torso_id, 2]) < 0.95  # pylint: disable=protected-access
-  assert np.allclose(np.asarray(state.obs[-2:]), [1.0, 1.0])  # both feet on the floor
+  soles = np.asarray(env._sole_heights(state.data))  # pylint: disable=protected-access
+  assert abs(soles.min() - 0.0005) < 1e-4  # lower foot re-seated on the floor
+  assert soles.max() < 0.02  # the other one (joint noise) is close to it
+  assert float(state.obs[-2:].max()) == 1.0
   assert set(state.metrics) == {f"reward/{k}" for k in sprint.REWARD_TERMS} | {
       "distance_x", "speed_per_step", "fell"
   }
@@ -139,14 +142,55 @@ def test_evaluate_reports_distance_and_falls():
     assert e["seconds"] < 10.0 and abs(e["distance_m"]) < 2.0
 
 
+def test_alternation_term_rewards_running_and_penalizes_hopping():
+  env = make_env()
+  t = np.arange(200)
+  patterns = {
+      "run": np.stack([(t % 20) < 6, ((t + 10) % 20) < 6], axis=1),
+      "two_foot_hop": np.stack([(t % 20) < 6, (t % 20) < 6], axis=1),
+      "one_leg_hop": np.stack([(t % 20) < 6, np.zeros_like(t, dtype=bool)], axis=1),
+      "tap_dance": np.stack([(t % 4) < 2, ((t + 2) % 4) < 2], axis=1),  # 0.05 s in the air
+  }
+  totals = {}
+  for name, pattern in patterns.items():
+    last, air, was = jp.array(-1, jp.int32), jp.zeros(2), jp.array([True, True])
+    total = 0.0
+    for down in pattern:
+      down = jp.array(down)
+      value, last, air = env._alternation(was, down, air, last)  # pylint: disable=protected-access
+      was = down
+      total += float(value)
+    totals[name] = total
+  assert totals["run"] >= 15  # ~19 alternating landings at full bonus
+  assert totals["two_foot_hop"] <= -9
+  assert totals["one_leg_hop"] <= -8
+  assert totals["tap_dance"] == 0.0  # steps too short to count
+
+
 def test_gait_metrics_tell_running_from_hopping():
   dt = 0.025
   t = np.arange(200)
   run = np.stack([(t % 20) < 8, ((t + 10) % 20) < 8], axis=1).astype(float)
   hop = np.stack([(t % 20) < 8, (t % 20) < 8], axis=1).astype(float)
   one_leg = np.stack([(t % 20) < 8, np.zeros_like(t)], axis=1).astype(float)
-  x = np.zeros((200, 2))
+  x = np.zeros((200, 2, 2))
+  z = np.zeros((200, 2, 2))
   knee = np.full((200, 2), 0.5)
-  assert evaluate.gait_metrics(run, x, knee, dt)["alternation"] > 0.95
-  assert evaluate.gait_metrics(hop, x, knee, dt)["alternation"] < 0.1
-  assert evaluate.gait_metrics(one_leg, x, knee, dt)["alternation"] < 0.1
+  assert evaluate.gait_metrics(run, x, z, knee, dt)["alternation"] > 0.95
+  assert evaluate.gait_metrics(hop, x, z, knee, dt)["alternation"] < 0.1
+  assert evaluate.gait_metrics(one_leg, x, z, knee, dt)["alternation"] < 0.1
+  # A foot dragged along at 2 m/s while "down" shows up as slip.
+  drag = np.stack([np.ones(200), np.zeros(200)], axis=1)
+  x_drag = np.repeat((np.arange(200) * 2.0 * dt)[:, None, None], 2, axis=1).repeat(2, axis=2)
+  assert abs(evaluate.gait_metrics(drag, x_drag, z, knee, dt)["foot_slip_mps"] - 2.0) < 1e-6
+
+
+def test_foot_slip_penalizes_a_dragged_foot_only():
+  env = make_env(foot_slip=1.0)
+  reset, _ = jitted(env)
+  s0 = reset(jax.random.PRNGKey(0)).data
+  moved = s0.replace(site_xpos=s0.site_xpos.at[:, 0].add(0.05))  # every site 5 cm forward
+  down = jp.array([True, False])
+  slip = float(env._foot_slip(s0, moved, down))  # pylint: disable=protected-access
+  assert np.isclose(slip, 0.05 / env.dt)  # only the grounded (right) foot counts
+  assert float(env._foot_slip(s0, s0, jp.array([True, True]))) == 0.0  # pylint: disable=protected-access

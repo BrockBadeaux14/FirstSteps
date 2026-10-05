@@ -18,7 +18,9 @@ from mujoco_playground._src import mjx_env
 XML_PATH = Path(__file__).resolve().parents[1] / "assets" / "humanoid2d.xml"
 
 # Named reward terms, in a fixed order. Each one's weight is in config.reward_weights.
-REWARD_TERMS = ("forward_velocity", "alive", "upright", "control_cost")
+REWARD_TERMS = (
+    "forward_velocity", "alive", "upright", "control_cost", "alternation", "foot_slip",
+)
 
 # Limb joints in qpos/qvel/actuator order (the three root joints come first).
 LIMB_JOINTS = (
@@ -71,12 +73,18 @@ def default_config() -> config_dict.ConfigDict:
       max_torso_pitch=1.0,  # rad, forward or backward lean
       # Reward.
       max_forward_velocity=12.0,  # m/s, clip for the forward_velocity term
-      foot_contact_threshold=0.01,  # m, sole height that counts as contact
+      foot_contact_threshold=0.005,  # m, sole height that counts as contact
+      # A landing counts as a step only after this much air time (no tap-dancing),
+      # and earns the full alternation bonus after full_step_air_time.
+      min_step_air_time=0.1,  # s
+      full_step_air_time=0.25,  # s
       reward_weights=config_dict.create(
           forward_velocity=1.0,
           alive=1.0,
           upright=0.0,
           control_cost=1e-3,
+          alternation=0.0,
+          foot_slip=0.0,
       ),
   )
 
@@ -140,11 +148,26 @@ class Sprint(mjx_env.MjxEnv):
     )
     obs = self._get_obs(data)
     reward, done = jp.zeros(2)
-    return mjx_env.State(data, obs, reward, done, metrics, {"rng": rng})
+    info = {
+        "rng": rng,
+        "last_foot": jp.array(-1, dtype=jp.int32),  # foot of the last step: 0 right, 1 left
+        "air_time": jp.zeros(2),  # seconds each foot has been off the floor
+    }
+    return mjx_env.State(data, obs, reward, done, metrics, info)
 
   def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
     cfg = self._config
+    # Playground's auto-reset restores data (time = 0) but not info: start the
+    # gait bookkeeping over at the first step of every episode.
+    first = state.data.time < 0.5 * self.sim_dt
+    last_foot = jp.where(first, -1, state.info["last_foot"])
+    air = jp.where(first, 0.0, state.info["air_time"])
+    was_down = self.foot_contacts(state.data) > 0.5
+
     data = mjx_env.step(self.mjx_model, state.data, action, self.n_substeps)
+    down = self.foot_contacts(data) > 0.5
+    alternation, last_foot, air = self._alternation(was_down, down, air, last_foot)
+    slip = self._foot_slip(state.data, data, down)
 
     dx = data.qpos[self._rootx] - state.data.qpos[self._rootx]
     velocity = dx / self.dt
@@ -166,6 +189,8 @@ class Sprint(mjx_env.MjxEnv):
         "alive": 1.0 - done,
         "upright": jp.cos(pitch),
         "control_cost": -jp.sum(jp.square(action)),
+        "alternation": alternation,
+        "foot_slip": -slip,
     }
     rewards = {k: self._weights[k] * terms[k] for k in REWARD_TERMS}
     reward = sum(rewards.values())
@@ -184,9 +209,41 @@ class Sprint(mjx_env.MjxEnv):
         speed_per_step=dx / self.dt,  # Brax divides *_per_step metrics by episode length
         fell=done,
     )
+    info = {**state.info, "last_foot": last_foot, "air_time": air}
     return state.replace(
-        data=data, obs=obs, reward=reward, done=done, metrics=metrics
+        data=data, obs=obs, reward=reward, done=done, metrics=metrics, info=info
     )
+
+  def _alternation(self, was_down, down, air, last_foot):
+    """+1 for landing on the other foot than last time, -1 for the same foot.
+
+    A landing only counts after min_step_air_time in the air; the bonus is
+    scaled by air time so tiny shuffle steps earn less. Both feet landing
+    together (a two-footed hop) costs -1 and clears the memory.
+    """
+    cfg = self._config
+    landed = down & ~was_down & (air >= cfg.min_step_air_time)
+    both = landed[0] & landed[1]
+    one = landed[0] ^ landed[1]
+    foot = jp.where(landed[0], 0, 1).astype(jp.int32)
+    bonus = jp.minimum(air[foot] / cfg.full_step_air_time, 1.0)
+    value = jp.where(last_foot == -1, 0.0, jp.where(last_foot == foot, -1.0, bonus))
+    value = jp.where(both, -1.0, jp.where(one, value, 0.0))
+    last_foot = jp.where(both, -1, jp.where(one, foot, last_foot)).astype(jp.int32)
+    air = jp.where(down, 0.0, air + self.dt)
+    return value, last_foot, air
+
+  def _foot_slip(self, data0: mjx.Data, data1: mjx.Data, down: jax.Array) -> jax.Array:
+    """Horizontal speed (m/s) of each grounded foot's lowest point, summed.
+
+    A planted or rolling foot pivots about its lowest point, which stays put;
+    a foot dragged or skated along the floor moves.
+    """
+    s0 = data0.site_xpos[self._foot_sites]  # (2 feet, heel/toe, xyz)
+    s1 = data1.site_xpos[self._foot_sites]
+    low = jp.argmin(s1[..., 2], axis=-1)  # lower site of each foot
+    dx = jp.take_along_axis(s1[..., 0] - s0[..., 0], low[:, None], axis=-1)[:, 0]
+    return jp.sum(jp.where(down, jp.abs(dx), 0.0)) / self.dt
 
   # ---------------------------------------------------------------------------
   # Helpers
