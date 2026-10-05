@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# Training outputs (checkpoints, videos, replays)
+runs/
+
+# Caches
+.jax_cache/

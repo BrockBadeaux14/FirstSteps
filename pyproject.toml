@@ -1,0 +1,24 @@
+[project]
+name = "sprinter"
+version = "0.1.0"
+description = "2D humanoid that learns to sprint: MuJoCo Playground env + Brax PPO on JAX"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "jax[cuda12]>=0.11.2",
+    "matplotlib>=3.11.2",
+    "mediapy>=1.2.7",
+    "playground>=0.2.0",
+    "pydantic>=2.13.5",
+    "pytest>=9.1.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sprinter"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
