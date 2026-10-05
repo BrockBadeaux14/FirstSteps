@@ -39,9 +39,11 @@
 
   <asset>
     <texture name="skybox" type="skybox" builtin="gradient" rgb1=".62 .76 .9" rgb2=".97 .98 1" width="512" height="512"/>
-    <!-- One texture tile per 10 m: its edges draw the 10 m lines across the track. -->
-    <texture name="track" type="2d" builtin="checker" rgb1=".36 .4 .46" rgb2=".33 .37 .43" mark="edge" markrgb=".95 .95 .95" width="1024" height="1024"/>
-    <material name="track" texture="track" texrepeat=".05 .05" texuniform="true" reflectance=".05"/>
+    <!-- A plane's texture tile spans 2/texrepeat meters: 10 m along x, so the
+         tile edges draw a line across the track every 10 m, and 200 m along y,
+         so no lengthwise edge lands on the visible track. -->
+    <texture name="track" type="2d" builtin="flat" rgb1=".35 .39 .45" mark="edge" markrgb=".95 .95 .95" width="512" height="512"/>
+    <material name="track" texture="track" texrepeat=".2 .01" texuniform="true" reflectance=".05"/>
     <material name="marker" rgba=".97 .8 .15 1"/>
     <material name="body" rgba=".88 .86 .82 1"/>
     <material name="left" rgba=".26 .52 .96 1"/>
@@ -67,7 +69,9 @@
 
   <worldbody>
     <light name="sun" pos="0 -2 8" dir="0 .25 -1" directional="true" diffuse=".55 .55 .55" castshadow="true"/>
-    <geom name="floor" type="plane" pos="140 5 0" size="150 8 .1" material="track" contype="1" conaffinity="1"/>
+    <!-- Tile edges sit a quarter tile from the plane's center, so x = 147.5 puts
+         the cross lines on multiples of 10 m (checked by rendering). -->
+    <geom name="floor" type="plane" pos="147.5 0 0" size="157.5 12 .1" material="track" contype="1" conaffinity="1"/>
 
     <!-- Distance markers: a post every 10 m, behind the runner. -->
     <geom name="marker_010" class="marker" pos="10 1.2 .5"/>
