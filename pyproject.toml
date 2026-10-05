@@ -5,9 +5,10 @@ description = "2D humanoid that learns to sprint: MuJoCo Playground env + Brax P
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "jax[cuda12]>=0.11.2",
+    "jax[cuda12]>=0.9.2,<0.10",
     "matplotlib>=3.11.2",
     "mediapy>=1.2.7",
+    "mujoco-mjx[warp]>=3.14.0",
     "playground>=0.2.0",
     "pydantic>=2.13.5",
     "pytest>=9.1.1",
