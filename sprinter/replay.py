@@ -223,6 +223,7 @@ def median_episode(result: dict[str, Any]) -> int:
 
 
 def make_replays(run_dir: Path, *, video: bool = True, width: int = 1280, height: int = 720) -> dict[str, Any]:
+  run_dir = run_dir.resolve()  # orbax only accepts absolute checkpoint paths
   cfg = cfglib.load_config(run_dir / "config.json")
   env = trainlib.make_env(cfg, EVAL_EPISODES)
   m, dt, T = env.mj_model, env.dt, cfg.sim.episode_length

@@ -176,7 +176,9 @@ class Sprint(mjx_env.MjxEnv):
     obs = jp.where(jp.isnan(obs), 0.0, obs)
     dx = jp.where(nan, 0.0, dx)
 
-    metrics = {f"reward/{k}": jp.where(nan, 0.0, v) for k, v in rewards.items()}
+    # Start from the incoming dict: Brax's eval wrapper adds its own keys to it.
+    metrics = dict(state.metrics)
+    metrics.update({f"reward/{k}": jp.where(nan, 0.0, v) for k, v in rewards.items()})
     metrics.update(
         distance_x=dx,
         speed_per_step=dx / self.dt,  # Brax divides *_per_step metrics by episode length

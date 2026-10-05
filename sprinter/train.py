@@ -184,6 +184,7 @@ def train(
 ) -> dict[str, Any]:
   """Trains one policy. Returns the train stats (also written to run_dir)."""
   require_gpu()
+  run_dir = run_dir.resolve()  # orbax only accepts absolute checkpoint paths
   run_dir.mkdir(parents=True, exist_ok=True)
   (run_dir / "config.json").write_text(
       json.dumps(cfg.model_dump(mode="json"), indent=2) + "\n"
