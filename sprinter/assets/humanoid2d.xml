@@ -1,0 +1,180 @@
+<!--
+  Sprinter: a planar (x-z) humanoid for the Sprint level.
+
+  Axes: x forward, z up, y to the runner's left. Every hinge turns about +y, so
+  a positive angle swings a hanging limb backward and tips the toes down:
+    hip       flexion (thigh forward)     < 0 < extension
+    knee      straight 0 .. 150 flexion (heel toward buttocks)
+    ankle     dorsiflexion (toes up)      < 0 < plantarflexion
+    shoulder  flexion (arm forward/up)    < 0 < extension
+    elbow     -150 flexion .. 0 straight
+
+  Proportions follow Winter's segment tables for a 1.75 m, 70 kg adult.
+  Body parts never collide with each other (left and right limbs overlap in 2D):
+  only the floor (conaffinity 1) collides with the "collide" class (contype 1).
+  Feet, shins (knees), hands, head and torso touch the floor; thighs and arms
+  are visual only, which keeps the contact count low.
+-->
+<mujoco model="humanoid2d">
+  <compiler angle="degree" autolimits="true"/>
+
+  <option timestep="0.0025" iterations="4" ls_iterations="8">
+    <flag eulerdamp="disable"/>
+  </option>
+
+  <custom>
+    <!-- Contact budget for the MJX "jax" backend. -->
+    <numeric name="max_contact_points" data="8"/>
+    <numeric name="max_geom_pairs" data="8"/>
+  </custom>
+
+  <statistic extent="3" center="0 0 1"/>
+
+  <visual>
+    <global offwidth="1280" offheight="720"/>
+    <headlight ambient=".45 .45 .45" diffuse=".6 .6 .6" specular=".1 .1 .1"/>
+    <map znear=".01"/>
+    <quality shadowsize="4096"/>
+  </visual>
+
+  <asset>
+    <texture name="skybox" type="skybox" builtin="gradient" rgb1=".62 .76 .9" rgb2=".97 .98 1" width="512" height="512"/>
+    <!-- A plane's texture tile spans 2/texrepeat meters: 10 m along x, so the
+         tile edges draw a line across the track every 10 m, and 200 m along y,
+         so no lengthwise edge lands on the visible track. -->
+    <texture name="track" type="2d" builtin="flat" rgb1=".35 .39 .45" mark="edge" markrgb=".95 .95 .95" width="512" height="512"/>
+    <material name="track" texture="track" texrepeat=".2 .01" texuniform="true" reflectance=".05"/>
+    <material name="marker" rgba=".97 .8 .15 1"/>
+    <material name="body" rgba=".88 .86 .82 1"/>
+    <material name="left" rgba=".26 .52 .96 1"/>
+    <material name="right" rgba=".96 .47 .16 1"/>
+    <material name="site" rgba=".85 .1 .1 .6"/>
+  </asset>
+
+  <default>
+    <joint type="hinge" axis="0 1 0" damping="2" armature="0.05" solimplimit="0 .99 .01"/>
+    <geom type="capsule" contype="0" conaffinity="0" condim="3" friction="1 .005 .0001" material="body"/>
+    <motor ctrlrange="-1 1"/>
+    <site size=".02" group="3" material="site"/>
+    <default class="collide">
+      <geom contype="1" conaffinity="0"/>
+    </default>
+    <default class="arm">
+      <joint damping="0.5" armature="0.02"/>
+    </default>
+    <default class="marker">
+      <geom type="box" size=".025 .025 .5" contype="0" conaffinity="0" material="marker"/>
+    </default>
+  </default>
+
+  <worldbody>
+    <light name="sun" pos="0 -2 8" dir="0 .25 -1" directional="true" diffuse=".55 .55 .55" castshadow="true"/>
+    <!-- Tile edges sit a quarter tile from the plane's center, so x = 147.5 puts
+         the cross lines on multiples of 10 m (checked by rendering). -->
+    <geom name="floor" type="plane" pos="147.5 0 0" size="157.5 12 .1" material="track" contype="1" conaffinity="1"/>
+
+    <!-- Distance markers: a post every 10 m, behind the runner. -->
+    <geom name="marker_010" class="marker" pos="10 1.2 .5"/>
+    <geom name="marker_020" class="marker" pos="20 1.2 .5"/>
+    <geom name="marker_030" class="marker" pos="30 1.2 .5"/>
+    <geom name="marker_040" class="marker" pos="40 1.2 .5"/>
+    <geom name="marker_050" class="marker" pos="50 1.2 .5"/>
+    <geom name="marker_060" class="marker" pos="60 1.2 .5"/>
+    <geom name="marker_070" class="marker" pos="70 1.2 .5"/>
+    <geom name="marker_080" class="marker" pos="80 1.2 .5"/>
+    <geom name="marker_090" class="marker" pos="90 1.2 .5"/>
+    <geom name="marker_100" class="marker" pos="100 1.2 .5"/>
+    <geom name="marker_110" class="marker" pos="110 1.2 .5"/>
+    <geom name="marker_120" class="marker" pos="120 1.2 .5"/>
+    <geom name="marker_130" class="marker" pos="130 1.2 .5"/>
+    <geom name="marker_140" class="marker" pos="140 1.2 .5"/>
+    <geom name="marker_150" class="marker" pos="150 1.2 .5"/>
+
+    <!-- Torso frame sits at the hip joints (pelvis). Straight legs put the soles on z=0. -->
+    <body name="torso" pos="0 0 .93">
+      <camera name="track" mode="trackcom" pos="0 -4.5 1.15" xyaxes="1 0 0 0 .26 .97"/>
+      <joint name="rootx" type="slide" axis="1 0 0" damping="0" armature="0"/>
+      <joint name="rootz" type="slide" axis="0 0 1" damping="0" armature="0"/>
+      <joint name="rooty" type="hinge" axis="0 1 0" damping="0" armature="0"/>
+      <geom name="torso" class="collide" fromto="0 0 .06 0 0 .42" size=".12" mass="34.8"/>
+
+      <body name="head" pos="0 0 .71">
+        <geom name="head" class="collide" type="sphere" size=".11" mass="5.7"/>
+      </body>
+
+      <body name="right_thigh" pos="0 -.09 0">
+        <joint name="right_hip" range="-130 30"/>
+        <geom name="right_thigh" fromto="0 0 0 0 0 -.36" size=".07" mass="7.0" material="right"/>
+        <body name="right_shin" pos="0 0 -.43">
+          <joint name="right_knee" range="0 150"/>
+          <geom name="right_shin" class="collide" fromto="0 0 0 0 0 -.38" size=".05" mass="3.25" material="right"/>
+          <body name="right_foot" pos="0 0 -.43">
+            <joint name="right_ankle" range="-30 50" damping="1"/>
+            <geom name="right_foot" class="collide" fromto="-.03 0 -.033 .17 0 -.033" size=".035" mass="1.0" material="right"/>
+            <site name="right_heel" pos="-.03 0 -.033"/>
+            <site name="right_toe" pos=".17 0 -.033"/>
+          </body>
+        </body>
+      </body>
+
+      <body name="left_thigh" pos="0 .09 0">
+        <joint name="left_hip" range="-130 30"/>
+        <geom name="left_thigh" fromto="0 0 0 0 0 -.36" size=".07" mass="7.0" material="left"/>
+        <body name="left_shin" pos="0 0 -.43">
+          <joint name="left_knee" range="0 150"/>
+          <geom name="left_shin" class="collide" fromto="0 0 0 0 0 -.38" size=".05" mass="3.25" material="left"/>
+          <body name="left_foot" pos="0 0 -.43">
+            <joint name="left_ankle" range="-30 50" damping="1"/>
+            <geom name="left_foot" class="collide" fromto="-.03 0 -.033 .17 0 -.033" size=".035" mass="1.0" material="left"/>
+            <site name="left_heel" pos="-.03 0 -.033"/>
+            <site name="left_toe" pos=".17 0 -.033"/>
+          </body>
+        </body>
+      </body>
+
+      <body name="right_upper_arm" pos="0 -.18 .49" childclass="arm">
+        <joint name="right_shoulder" range="-180 60"/>
+        <geom name="right_upper_arm" fromto="0 0 0 0 0 -.29" size=".045" mass="2.0" material="right"/>
+        <body name="right_forearm" pos="0 0 -.33">
+          <joint name="right_elbow" range="-150 0"/>
+          <geom name="right_forearm" fromto="0 0 0 0 0 -.22" size=".038" mass="1.1" material="right"/>
+          <body name="right_hand" pos="0 0 -.25">
+            <geom name="right_hand" class="collide" type="sphere" pos="0 0 -.05" size=".045" mass=".45" material="right"/>
+            <site name="right_hand_grip" pos="0 0 -.05"/>
+          </body>
+        </body>
+      </body>
+
+      <body name="left_upper_arm" pos="0 .18 .49" childclass="arm">
+        <joint name="left_shoulder" range="-180 60"/>
+        <geom name="left_upper_arm" fromto="0 0 0 0 0 -.29" size=".045" mass="2.0" material="left"/>
+        <body name="left_forearm" pos="0 0 -.33">
+          <joint name="left_elbow" range="-150 0"/>
+          <geom name="left_forearm" fromto="0 0 0 0 0 -.22" size=".038" mass="1.1" material="left"/>
+          <body name="left_hand" pos="0 0 -.25">
+            <geom name="left_hand" class="collide" type="sphere" pos="0 0 -.05" size=".045" mass=".45" material="left"/>
+            <site name="left_hand_grip" pos="0 0 -.05"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <keyframe>
+    <!-- Standing start: knees bent 16 deg, feet flat, soles 0.5 mm above the floor. -->
+    <key name="stand" qpos="0 -.0099 0  -.1396 .2793 -.1396  -.1396 .2793 -.1396  -.0698 -.2094  -.0698 -.2094"/>
+  </keyframe>
+
+  <actuator>
+    <motor name="right_hip" joint="right_hip" gear="250"/>
+    <motor name="right_knee" joint="right_knee" gear="200"/>
+    <motor name="right_ankle" joint="right_ankle" gear="120"/>
+    <motor name="left_hip" joint="left_hip" gear="250"/>
+    <motor name="left_knee" joint="left_knee" gear="200"/>
+    <motor name="left_ankle" joint="left_ankle" gear="120"/>
+    <motor name="right_shoulder" joint="right_shoulder" gear="60"/>
+    <motor name="right_elbow" joint="right_elbow" gear="40"/>
+    <motor name="left_shoulder" joint="left_shoulder" gear="60"/>
+    <motor name="left_elbow" joint="left_elbow" gear="40"/>
+  </actuator>
+</mujoco>
