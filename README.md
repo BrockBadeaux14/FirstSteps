@@ -41,7 +41,8 @@ This writes `runs/<timestamp>-sprint-s<seed>/`:
 
 Options: `--seed N` overrides the config's seed, `--run-dir DIR` picks the output folder, and
 `--compile-cache DIR` sets the persistent XLA compilation cache (default `.jax_cache`, `""` to
-disable). A warm cache cuts startup for configs with the same network shape and hyperparameters.
+disable). The cache cuts startup for repeat configs on the `jax` physics backend but barely
+helps on `warp` (see the recompile test below). It stays small either way (a few MB).
 
 ## Replay
 
@@ -117,7 +118,8 @@ dm_control walker); 10 motors (hips, knees, ankles, shoulders, elbows) with `ctr
 [-1, 1]; knees and elbows bend one way only. Left limbs are blue and right limbs orange.
 Only the feet, shins, hands, head and torso touch the floor, and body parts never touch each
 other. Hands are separate bodies with grip sites, and feet have heel and toe sites. The
-scene has a 300 m track with a line and a post every 10 m, and a camera that follows the runner.
+scene is a track from -10 m to 305 m with a line across it every 10 m, a post every 10 m up to
+150 m, and a camera that follows the runner.
 
 `sprinter/envs/sprint.py` (`Sprint`, a Playground `MjxEnv` modeled on the dm_control walker):
 
@@ -184,7 +186,9 @@ seed keeps a hand on its head). Seed 2's run is crouched, with knees bent.
 ## Results (RTX 3070, WSL2)
 
 `configs/sprint_default.json`, Warp backend, 58,982,400 steps, three seeds. Each was trained
-with one command from a fresh shell and an empty compile cache. The table comes from
+with one command from a fresh shell, with no compile cache (cold compile):
+`uv run python -m sprinter.train --config configs/sprint_default.json --seed N --run-dir runs/final-seedN --compile-cache ""`.
+The table comes from
 `uv run python scripts/seed_report.py runs/final-seed0 runs/final-seed1 runs/final-seed2`.
 
 | Seed | Wall time (incl. compile) | Compile | Steps/s | Distance in 10 s (mean, min-max of 10) | Falls | Passed | Alternation | Stance imbalance | Foot slip | Peak GPU mem (XLA) |
