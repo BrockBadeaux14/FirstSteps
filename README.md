@@ -1,1 +1,182 @@
-# FirstSteps
+# FirstSteps: a 2D humanoid that learns to sprint
+
+Milestone 1 of a reinforcement-learning game. A planar humanoid ("Sprinter") learns to run
+from one JSON config, on one GPU, in about 10 minutes. Training uses a MuJoCo Playground
+environment and Brax PPO on JAX, with the MuJoCo Warp physics backend.
+
+The config file is the contract the future app server will send to a GPU worker. Training
+streams one line per evaluation to `metrics.jsonl` (the future live-stats feed). Each run
+ends with `replay.json` files that a phone can draw without any physics.
+
+## Setup
+
+Linux (or WSL2 Ubuntu 24.04) with an NVIDIA GPU and driver; no CUDA toolkit needed. See
+[SETUP_NOTES.md](SETUP_NOTES.md) for the exact versions and the WSL details.
+
+```bash
+sudo apt install build-essential git ffmpeg libegl1 libgl1 libosmesa6   # once
+curl -LsSf https://astral.sh/uv/install.sh | sh                        # once, if uv is missing
+uv sync                                                                  # Python 3.12 + locked deps
+```
+
+Check the GPU: `uv run python -c "import jax; print(jax.devices())"` must print a `CudaDevice`.
+Training refuses to run on the CPU.
+
+## Train
+
+```bash
+uv run python -m sprinter.train --config configs/sprint_default.json
+```
+
+This writes `runs/<timestamp>-sprint-s<seed>/`:
+
+| File | What it is |
+|---|---|
+| `config.json` | the validated config |
+| `metrics.jsonl` | one line per eval: timesteps, wall time, eval reward, each reward component, distance, speed, fall rate |
+| `checkpoints/<step>/` | Brax (orbax) checkpoint after every eval period |
+| `final/<step>/` | the final params |
+| `train_stats.json` | versions, GPU, backend, compile time vs training time, steps/s, peak GPU memory |
+| `eval.json` | 10 deterministic 10 s episodes of the final policy, with gait statistics |
+
+Options: `--seed N` overrides the config's seed, `--run-dir DIR` picks the output folder, and
+`--compile-cache DIR` sets the persistent XLA compilation cache (default `.jax_cache`, `""` to
+disable). A warm cache cuts startup for configs with the same network shape and hyperparameters.
+
+## Replay
+
+```bash
+uv run python -m sprinter.replay --run runs/<id>
+```
+
+Adds to the run folder:
+
+| File | What it is |
+|---|---|
+| `replay.json`, `replay.mp4` | the final policy, one 10 s episode (the median of the 10 eval episodes) |
+| `before/replay.json`, `before/replay.mp4` | the checkpoint nearest 10% of training |
+| `before_after.mp4` | the two side by side |
+| `reward_curve.png` | reward, reward components, distance and falls over training |
+| `summary.json` | versions, backend, GPU, compile time, steps/s, wall time, distance, pass/fail |
+
+### replay.json format
+
+Built so the phone needs no physics and no kinematics:
+
+* `skeleton`: written once, one entry per body in a fixed order: `name`, `parent`, `offset`
+  (body origin in the parent frame, `[x, z]`), `side` (left/right/center), `depth`, `color`,
+  and `geom` (`capsule` with `from`/`to`/`radius`, or `sphere` with `center`/`radius`,
+  in the body frame).
+* `frames`: one per control step (40 per second): `t` and `poses`, a list with each body's
+  world pose `[x, z, angle]` in skeleton order, rounded to 3 decimals.
+* `meta`: level, `dt`, units and axes (meters, radians, x forward, z up), the angle convention
+  (counter-clockwise positive with +x right and +z up), `draw_order`, distance, `fell`,
+  checkpoint step, seed and a hash of the config.
+
+To draw a body: a point `(u, v)` in its frame is at
+`(x + u cos a - v sin a, z + u sin a + v cos a)`. A 10 s episode is about 127 KB.
+
+## Tests
+
+```bash
+uv run pytest
+```
+
+* `tests/test_model.py`: the model loads; human proportions; body parts only collide with
+  the floor; a passive drop falls realistically (free-fall check, no energy gain, comes to
+  rest); the standing pose rests on the ground and can be held; 1,000 random-action steps give
+  no NaNs on both the `warp` and `jax` backends.
+* `tests/test_env.py`: reset/step, the reward is the weighted sum of its named terms, weights
+  come from the config, termination, the Brax training wrapper, warp and jax agree, gait terms.
+* `tests/test_config.py`: the schema accepts the presets and rejects everything else.
+
+## Config
+
+`configs/sprint_default.json` is validated by the pydantic schema in `sprinter/config.py`.
+The limits mirror the future block editor:
+
+* `network`: `policy_hidden` and `value_hidden`, 1-6 layers each, widths from
+  {16, 32, 64, 128, 256}; `activation` from {relu, tanh, swish, elu}. Mapped to Brax's
+  `make_ppo_networks` through `network_factory`.
+* `ppo`: passed to `brax.training.agents.ppo.train` (timesteps, parallel envs, batch size,
+  minibatches, unroll length, updates per batch, learning rate, discount, entropy cost, clip
+  range, reward scaling, observation normalization, number of evals).
+* `reward_weights`: one weight per named reward term (below).
+* `sim`: physics backend (`warp` or `jax`), episode length, control and physics timesteps.
+
+`uv run python -m sprinter.config --schema` prints the JSON schema (ranges, defaults and a
+one-line description per field, ready for tooltips). Brax rounds `num_timesteps` up to whole
+PPO updates (983,040 steps each with the default batch settings), so the default is an exact
+multiple: 58,982,400 = 60 updates.
+
+## The model and the level
+
+`sprinter/assets/humanoid2d.xml`: 1.75 m, 70.1 kg, segment lengths and masses from Winter's
+anthropometric tables. Planar root (`rootx`, `rootz` slides and `rooty` hinge, like the
+dm_control walker); 10 motors (hips, knees, ankles, shoulders, elbows) with `ctrlrange`
+[-1, 1]; knees and elbows bend one way only. Left limbs are blue and right limbs orange.
+Only the feet, shins, hands, head and torso touch the floor, and body parts never touch each
+other. Hands are separate bodies with grip sites, and feet have heel and toe sites. The
+scene has a 300 m track with a line and a post every 10 m, and a camera that follows the runner.
+
+`sprinter/envs/sprint.py` (`Sprint`, a Playground `MjxEnv` modeled on the dm_control walker):
+
+* 10 s episodes: 400 control steps at `ctrl_dt` 0.025 s, physics at 0.0025 s.
+* Reset: standing keyframe plus small joint-angle and velocity noise, feet re-seated on the floor.
+* Observations (28): joint angles and velocities, torso height, torso pitch as sin/cos, root
+  linear and angular velocity, foot contact flags.
+* Termination: hips below 0.65 m, torso pitch beyond 1 rad, or NaN.
+* Reward: a weighted sum of named terms, each logged separately:
+
+| Term | Per step | Default weight |
+|---|---|---|
+| `forward_velocity` | torso x velocity, clipped at 12 m/s | 1.0 |
+| `alive` | 1 while upright | 1.0 |
+| `upright` | cos(torso pitch) | 0.0 |
+| `control_cost` | -sum of squared motor commands | 0.001 |
+| `alternation` | +1 (scaled by air time) for landing on the other foot than last time, -1 for the same foot or both feet | 5.0 |
+| `foot_slip` | -speed (m/s) of each grounded foot's lowest point | 1.0 |
+
+* Metrics: `distance_x` (m), mean speed, `fell`. The level score is the distance covered in 10 s.
+
+## Reward hacks found
+
+Each one was spotted in the eval videos and the gait statistics in `eval.json`, then fixed in
+the reward. They make good in-game lessons.
+
+1. **One-leg skipping with a high kick** (Gymnasium Walker2d-style weights: forward 1.0,
+   alive 1.0, control 0.001). The runner covered 59.6 m in 10 s without falling, so it passed the
+   distance bar. But the right leg did all the work: 37 right-foot landings to 16 left, with the
+   right foot on the ground 48% of the time and the left 19%. The left leg was thrown forward in
+   a high kick and only came down every other stride. Fix: the `alternation` term, which pays for
+   landing on the opposite foot and charges for landing on the same foot twice or on both feet.
+   Steps need 0.1 s of air time to count, so tap-dancing earns nothing.
+2. **Toe-drag leap** (after fix 1). The landings now alternated (alternation 0.97), but the
+   runner made long split leaps and dragged its right toe along the track behind it, like a third
+   leg for balance. The right foot "touched" the floor 44% of the time and the feet slid at 1.2 m/s
+   while touching it. Fix: the `foot_slip` penalty on the speed of a grounded foot's lowest point.
+   A planted or rolling foot does not move there, but a dragged one does.
+
+With both fixes the gait is a symmetric, alternating bounding run: 17 landings per foot,
+flight phases about 59% of the time, and no dive at the start. Hacks that did not show up:
+diving forward at the start (falling ends the episode and loses the alive bonus), knee-sliding
+(prevented by the hip-height termination) and glitching through contacts.
+
+## Repo layout
+
+```
+configs/sprint_default.json   default config (the app's contract)
+sprinter/
+  assets/humanoid2d.xml       the humanoid and the scene
+  envs/sprint.py              Sprint environment (MuJoCo Playground MjxEnv)
+  config.py                   pydantic schema and presets
+  train.py                    config -> Brax PPO, metrics.jsonl, checkpoints, timing
+  evaluate.py                 deterministic eval episodes, gait statistics, pass/fail
+  replay.py                   replay.json / mp4 / before-after / summary.json
+  plots.py                    reward_curve.png
+  recompile_test.py           does a hyperparameter-only change recompile?
+  system_info.py              versions and GPU info
+scripts/                      Step 2 smoke test, env benchmark, GPU memory sampler
+tests/
+runs/                         outputs (gitignored)
+```
