@@ -27,7 +27,7 @@
     "alive": 1.0,
     "upright": 0.0,
     "control_cost": 0.001,
-    "alternation": 5.0,
+    "alternation": 10.0,
     "foot_slip": 0.5,
     "symmetry": 5.0
   },
