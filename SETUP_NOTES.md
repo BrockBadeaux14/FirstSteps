@@ -182,3 +182,28 @@ Brax's per-epoch `training/sps` metric reads 0.8-1.3M steps/s, which is wrong. W
 epoch timer stops before the GPU work finishes. The numbers above come from
 wall-clock time between evals. For reference, the unpatched Warp run (warnings on)
 took 629 s and reached eval reward 154.9.
+
+## Steps 3-6: no further installs
+
+Nothing else was installed after Step 2. Environment variables the code sets for itself
+(only if not already set):
+
+| Variable | Value | Why |
+|---|---|---|
+| `XLA_PYTHON_CLIENT_PREALLOCATE` | `false` | Windows holds ~2.6 GB of VRAM; grow on demand instead of reserving 75% |
+| `JAX_DEFAULT_MATMUL_PRECISION` | `highest` | full FP32 matmuls; Playground's README warns that TF32 on Ampere hurts RL stability |
+| `MUJOCO_GL` | `egl` (replay only) | headless rendering; `osmesa` is installed as a fallback |
+
+Other findings that affect the setup:
+
+* **Persistent XLA compile cache and Warp.** `sprinter.train` enables a persistent cache
+  (`.jax_cache`), but with the Warp backend it barely helps. Warp's JAX bridge
+  (`warp/_src/jax/ffi.py`) stamps every traced FFI call with an incrementing `call_id`, so
+  the compiled program differs on every trace. It got 0-3 cache hits per run. See the recompile
+  test in the README.
+* **Harmless warnings:** `jaxopt` prints a deprecation warning on import (pulled in by Brax),
+  and Warp prints one `Module ... load on device` line per kernel (cached in
+  `~/.cache/warp/1.17.0` after the first run).
+* **WSL2 GPU sharing:** the Windows desktop's VRAM use (2.2-2.9 GB here) varies with open apps.
+  Training peaks at about 1.8 GB on top of that, so 8 GB cards have room for one run at a time
+  plus the desktop.
