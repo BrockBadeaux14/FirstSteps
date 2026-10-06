@@ -60,6 +60,27 @@ Adds to the run folder:
 | `reward_curve.png` | reward, reward components, distance and falls over training |
 | `summary.json` | versions, backend, GPU, compile time, steps/s, wall time, distance, pass/fail |
 
+## Watch live
+
+```bash
+uv run python -m sprinter.play --run runs/final-seed1
+```
+
+Opens MuJoCo's viewer and plays the trained runner in real time. The policy and physics run
+exactly as in training and evaluation: the Sprint env on the GPU, with the same backend. A
+new episode starts after 10 s, or 1 s after a fall. The overlay shows the episode, time,
+distance, mean speed and checkpoint. Each finished episode is also printed with its playback
+rate (about 1.0x on the RTX 3070).
+
+* `--checkpoint before` plays the ~10% checkpoint; `--checkpoint <step>` plays any saved step.
+  The default is `final`.
+* `--speed 0.5` gives slow motion. `--episodes N` stops after N episodes. `--seed` changes
+  the start poses.
+* In the window: Space pauses, Enter restarts the episode, left-drag orbits, scroll zooms. The
+  camera keeps following the runner.
+* It needs a display. In WSL2, WSLg provides one, but its OpenGL is software (llvmpipe), so
+  shadows and floor reflections are off by default to hold real time. `--shadows` turns them on.
+
 ### replay.json format
 
 Built so the phone needs no physics and no kinematics:
@@ -90,6 +111,8 @@ uv run pytest
 * `tests/test_env.py`: reset/step, the reward is the weighted sum of its named terms, weights
   come from the config, termination, the Brax training wrapper, warp and jax agree, gait terms.
 * `tests/test_config.py`: the schema accepts the presets and rejects everything else.
+* `tests/test_play.py`: checkpoint selection and the live player's stepping and restarts,
+  using a run with untrained weights (no window needed).
 
 ## Config
 
@@ -278,6 +301,8 @@ sprinter/
   train.py                    config -> Brax PPO, metrics.jsonl, checkpoints, timing
   evaluate.py                 deterministic eval episodes, gait statistics, pass/fail
   replay.py                   replay.json / mp4 / before-after / summary.json
+  play.py                     watch a trained runner live in the MuJoCo viewer
+  policy.py                   find checkpoints in a run and load them as policies
   plots.py                    reward_curve.png
   recompile_test.py           does a hyperparameter-only change recompile?
   system_info.py              versions and GPU info

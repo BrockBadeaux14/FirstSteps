@@ -10,3 +10,7 @@ runs/
 
 # Caches
 .jax_cache/
+
+# Files the MuJoCo viewer writes to the working directory
+MJDATA.TXT
+MUJOCO_LOG.TXT
