@@ -27,10 +27,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from brax.training import checkpoint as brax_checkpoint
-from brax.training import types as brax_types
-from brax.training.acme import running_statistics
-from brax.training.agents.ppo import networks as ppo_networks
 import mediapy
 import mujoco
 import numpy as np
@@ -39,38 +35,14 @@ from PIL import Image, ImageDraw, ImageFont
 from sprinter import config as cfglib
 from sprinter import evaluate
 from sprinter import plots
+from sprinter import policy as policylib
 from sprinter import system_info
 from sprinter import train as trainlib
 
 REPLAY_FORMAT = "sprinter-replay/1"
 EVAL_EPISODES = 10
-EARLY_FRACTION = 0.10
 AFTER_FALL_S = 1.0  # keep showing the body this long after a fall
 MAX_WALL_TIME_S = 30 * 60
-
-
-# -----------------------------------------------------------------------------
-# Checkpoints and policies
-
-
-def list_checkpoints(run_dir: Path) -> list[tuple[int, Path]]:
-  ckpts = [(int(p.name), p) for p in (run_dir / "checkpoints").iterdir() if p.name.isdigit()]
-  return sorted(ckpts)
-
-
-def final_checkpoint(run_dir: Path) -> tuple[int, Path]:
-  final = sorted((int(p.name), p) for p in (run_dir / "final").iterdir() if p.name.isdigit())
-  return final[-1] if final else list_checkpoints(run_dir)[-1]
-
-
-def load_policy(cfg: cfglib.TrainConfig, ckpt: Path, obs_size: int, action_size: int):
-  params = brax_checkpoint.load(ckpt)
-  normalize = (running_statistics.normalize if cfg.ppo.normalize_observations
-               else brax_types.identity_observation_preprocessor)
-  network = trainlib.make_network_factory(cfg.network)(
-      obs_size, action_size, preprocess_observations_fn=normalize
-  )
-  return ppo_networks.make_inference_fn(network)(params, deterministic=True)
 
 
 # -----------------------------------------------------------------------------
@@ -229,9 +201,8 @@ def make_replays(run_dir: Path, *, video: bool = True, width: int = 1280, height
   m, dt, T = env.mj_model, env.dt, cfg.sim.episode_length
   obs_size, act_size = int(env.observation_size), env.action_size
 
-  final_step, final_path = final_checkpoint(run_dir)
-  ckpts = list_checkpoints(run_dir)
-  early_step, early_path = min(ckpts, key=lambda c: abs(c[0] - EARLY_FRACTION * final_step))
+  final_step, final_path = policylib.final_checkpoint(run_dir)
+  early_step, early_path = policylib.early_checkpoint(run_dir)
 
   outputs: dict[str, Any] = {}
   results = {}
@@ -240,7 +211,7 @@ def make_replays(run_dir: Path, *, video: bool = True, width: int = 1280, height
       ("after", final_step, final_path, run_dir),
       ("before", early_step, early_path, run_dir / "before"),
   ):
-    policy = load_policy(cfg, path, obs_size, act_size)
+    policy = policylib.load_policy(cfg, path, obs_size, act_size)
     result = evaluate.evaluate(env, policy, EVAL_EPISODES, seed=cfg.seed + 1000)
     results[tag] = result
     traj = result["_trajectories"]
