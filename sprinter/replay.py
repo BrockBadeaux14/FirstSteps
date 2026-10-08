@@ -107,7 +107,7 @@ def build_replay(
   return {
       "meta": {
           "format": REPLAY_FORMAT,
-          "level": cfg.level,
+          "level": cfg.level.type,
           "dt": dt,
           "fps": round(1.0 / dt),
           "num_frames": n_frames,
@@ -268,7 +268,7 @@ def build_summary(run_dir: Path, cfg, result, outputs) -> dict[str, Any]:
   }
   return {
       "run": run_dir.name,
-      "level": cfg.level,
+      "level": cfg.level.type,
       "seed": cfg.seed,
       "config_hash": cfg.config_hash(),
       "backend": cfg.sim.impl,

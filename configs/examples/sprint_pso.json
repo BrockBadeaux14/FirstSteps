@@ -1,0 +1,19 @@
+{
+  "config_version": 2,
+  "seed": 0,
+  "level": {
+    "type": "sprint"
+  },
+  "brain": {
+    "type": "rhythm",
+    "harmonics": 1
+  },
+  "trainer": {
+    "type": "pso",
+    "generations": 178,
+    "population_size": 2048,
+    "inertia": 0.75,
+    "cognitive": 1.5,
+    "social": 2.0
+  }
+}

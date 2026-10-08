@@ -255,8 +255,9 @@ with the Warp backend). Sprint's default PPO config is this size today: 58,982,4
 * Settings that make each step slower, such as a bigger network, make a run take longer but
   not train further. The editor's limits bound how much longer.
 * The caps are set per trainer from the timings in the spike ([#9]), which runs at the same
-  10 minutes, and stored with the references ([below](#where-the-numbers-live)). Today's Sprint
-  schema allows `num_timesteps` up to 500 million; config contract v2 lowers that to the cap.
+  10 minutes, and stored with the references ([below](#where-the-numbers-live)). The config
+  schema already rejects a run longer than its trainer's cap, with placeholder caps until the
+  spike reports ([config.md](config.md#placeholders)).
 * Without the same budget, 80% of the reference may be out of reach: a reference trained for
   an hour would hold a 10-minute run to a score it cannot get.
 

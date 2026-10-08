@@ -1,0 +1,18 @@
+{
+  "config_version": 2,
+  "seed": 0,
+  "level": {
+    "type": "sprint"
+  },
+  "brain": {
+    "type": "rhythm",
+    "harmonics": 1
+  },
+  "trainer": {
+    "type": "ga",
+    "generations": 178,
+    "population_size": 2048,
+    "elite_fraction": 0.5,
+    "mutation_std": 0.1
+  }
+}

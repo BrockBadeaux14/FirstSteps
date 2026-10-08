@@ -114,23 +114,35 @@ uv run pytest
   no NaNs on both the `warp` and `jax` backends.
 * `tests/test_env.py`: reset/step, the reward is the weighted sum of its named terms, weights
   come from the config, termination, the Brax training wrapper, warp and jax agree, gait terms.
-* `tests/test_config.py`: the schema accepts the presets and rejects everything else.
+* `tests/test_config.py`: every level, brain, trainer and optimizer in the schema, every
+  rejection rule, the step caps, the v1 -> v2 migration and the config hash.
 * `tests/test_play.py`: checkpoint selection and the live player's stepping and restarts,
   using a run with untrained weights (no window needed).
 
 ## Config
 
-`configs/sprint_default.json` is validated by the pydantic schema in `sprinter/config.py`.
-The limits mirror the future block editor:
+`configs/sprint_default.json` is validated by the pydantic schema in `sprinter/config.py`
+(version 2, explained in [docs/config.md](docs/config.md)). The limits mirror the future
+block editor:
 
-* `network`: `policy_hidden` and `value_hidden`, 1-6 layers each, widths from
-  {16, 32, 64, 128, 256}; `activation` from {relu, tanh, swish, elu}. Mapped to Brax's
-  `make_ppo_networks` through `network_factory`.
-* `ppo`: passed to `brax.training.agents.ppo.train` (timesteps, parallel envs, batch size,
-  minibatches, unroll length, updates per batch, learning rate, discount, entropy cost, clip
-  range, reward scaling, observation normalization, number of evals).
-* `reward_weights`: one weight per named reward term (below).
+* `level`: the level (`sprint` so far) and its `reward_weights`, one weight per named reward
+  term (below).
+* `brain`: a rhythm controller or a neural network (`mlp`). The network has `policy_hidden`
+  and `value_hidden`, 1-6 layers each, widths from {16, 32, 64, 128, 256}, and an
+  `activation` from {relu, tanh, swish, elu}. It is mapped to Brax's `make_ppo_networks`
+  through `network_factory`.
+* `trainer`: hill climbing, GA, PSO, CMA-ES, the copy trainer, REINFORCE or PPO, each with its
+  own settings and a cap on its training length. The PPO settings are passed to
+  `brax.training.agents.ppo.train` (timesteps, parallel envs, batch size, minibatches, unroll
+  length, updates per batch, discount, entropy cost, clip range, reward scaling, observation
+  normalization, number of evals).
+* `optimizer`: SGD, RMSprop or Adam and a learning rate, for the gradient-based trainers.
 * `sim`: physics backend (`warp` or `jax`), episode length, control and physics timesteps.
+
+Rules across blocks tie them together: for example, the evolution trainers use the rhythm
+controller and take no optimizer. Any valid config can be sent, but `sprinter.train` only
+trains PPO with Adam so far. Milestone 1's version 1 configs, including the `config.json` in
+existing run folders, still load.
 
 `uv run python -m sprinter.config --schema` prints the JSON schema (ranges, defaults and a
 one-line description per field, ready for tooltips). Brax rounds `num_timesteps` up to whole
@@ -299,7 +311,9 @@ short run); they are kept for stability as Playground recommends for Ampere GPUs
 ```
 app/                          Flutter app: the replay player (see app/README.md)
 configs/sprint_default.json   default config (the app's contract)
+configs/examples/             an example config for each other trainer
 docs/game-design.md           level lineup, eras and trainer decisions
+docs/config.md                the config contract: blocks, rules, placeholders, migration
 sprinter/
   assets/humanoid2d.xml       the humanoid and the scene
   envs/sprint.py              Sprint environment (MuJoCo Playground MjxEnv)

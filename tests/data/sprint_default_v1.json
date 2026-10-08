@@ -1,32 +1,19 @@
 {
-  "config_version": 2,
+  "level": "sprint",
   "seed": 0,
-  "level": {
-    "type": "sprint",
-    "reward_weights": {
-      "forward_velocity": 1.0,
-      "alive": 1.0,
-      "upright": 0.0,
-      "control_cost": 0.001,
-      "alternation": 10.0,
-      "foot_slip": 0.5,
-      "symmetry": 5.0
-    }
-  },
-  "brain": {
-    "type": "mlp",
+  "network": {
     "policy_hidden": [32, 32, 32, 32],
     "value_hidden": [256, 256, 256, 256, 256],
     "activation": "swish"
   },
-  "trainer": {
-    "type": "ppo",
+  "ppo": {
     "num_timesteps": 58982400,
     "num_envs": 2048,
     "batch_size": 1024,
     "num_minibatches": 32,
     "unroll_length": 30,
     "num_updates_per_batch": 16,
+    "learning_rate": 0.001,
     "discounting": 0.995,
     "entropy_cost": 0.01,
     "clipping_epsilon": 0.3,
@@ -35,9 +22,14 @@
     "num_evals": 21,
     "num_eval_envs": 128
   },
-  "optimizer": {
-    "type": "adam",
-    "learning_rate": 0.001
+  "reward_weights": {
+    "forward_velocity": 1.0,
+    "alive": 1.0,
+    "upright": 0.0,
+    "control_cost": 0.001,
+    "alternation": 10.0,
+    "foot_slip": 0.5,
+    "symmetry": 5.0
   },
   "sim": {
     "impl": "warp",

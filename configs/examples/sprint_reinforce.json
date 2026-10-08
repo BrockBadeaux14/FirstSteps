@@ -1,0 +1,26 @@
+{
+  "config_version": 2,
+  "seed": 0,
+  "level": {
+    "type": "sprint"
+  },
+  "brain": {
+    "type": "mlp",
+    "policy_hidden": [32, 32, 32, 32],
+    "activation": "swish"
+  },
+  "trainer": {
+    "type": "reinforce",
+    "num_timesteps": 58982400,
+    "num_envs": 2048,
+    "discounting": 0.995,
+    "entropy_cost": 0.01,
+    "normalize_observations": true,
+    "num_evals": 21,
+    "num_eval_envs": 128
+  },
+  "optimizer": {
+    "type": "rmsprop",
+    "learning_rate": 0.001
+  }
+}
