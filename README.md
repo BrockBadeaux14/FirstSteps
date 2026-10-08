@@ -99,6 +99,9 @@ Built so the phone needs no physics and no kinematics:
 To draw a body: a point `(u, v)` in its frame is at
 `(x + u cos a - v sin a, z + u sin a + v cos a)`. A 10 s episode is about 127 KB.
 
+The Flutter app in `app/` plays these files, before and after side by side. See
+[app/README.md](app/README.md).
+
 ## Tests
 
 ```bash
@@ -294,6 +297,7 @@ short run); they are kept for stability as Playground recommends for Ampere GPUs
 ## Repo layout
 
 ```
+app/                          Flutter app: the replay player (see app/README.md)
 configs/sprint_default.json   default config (the app's contract)
 docs/game-design.md           level lineup, eras and trainer decisions
 sprinter/
