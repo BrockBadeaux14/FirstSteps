@@ -50,9 +50,9 @@ def pick_checkpoint(run_dir: Path, which: str) -> tuple[int, Path]:
 def load_policy(cfg: cfglib.TrainConfig, ckpt: Path, obs_size: int, action_size: int):
   """Deterministic inference function: policy(obs, key) -> (action, {})."""
   params = brax_checkpoint.load(ckpt)
-  normalize = (running_statistics.normalize if cfg.ppo.normalize_observations
+  normalize = (running_statistics.normalize if cfg.trainer.normalize_observations
                else brax_types.identity_observation_preprocessor)
-  network = trainlib.make_network_factory(cfg.network)(
+  network = trainlib.make_network_factory(cfg.brain)(
       obs_size, action_size, preprocess_observations_fn=normalize
   )
   return ppo_networks.make_inference_fn(network)(params, deterministic=True)

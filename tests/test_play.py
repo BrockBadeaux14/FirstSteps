@@ -24,7 +24,7 @@ def run_dir(tmp_path_factory):
   (run / "config.json").write_text(cfg.model_dump_json())
   env = trainlib.make_env(cfg, num_envs=1)
   obs_size, act_size = int(env.observation_size), env.action_size
-  factory = trainlib.make_network_factory(cfg.network)
+  factory = trainlib.make_network_factory(cfg.brain)
   nets = factory(obs_size, act_size, preprocess_observations_fn=running_statistics.normalize)
   k_policy, k_value = jax.random.split(jax.random.PRNGKey(0))
   params = (

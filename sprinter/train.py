@@ -57,6 +57,16 @@ RUNS_DIR = Path("runs")
 # Config -> env / networks / ppo.train arguments
 
 
+def check_supported(cfg: cfglib.TrainConfig) -> None:
+  """Any valid config can be sent, but this worker only trains PPO with Adam so far."""
+  if cfg.trainer.type != "ppo":
+    raise NotImplementedError(f"this worker only trains ppo so far, not {cfg.trainer.type}")
+  if cfg.optimizer.type != "adam":
+    raise NotImplementedError(
+        f"Brax's PPO always uses Adam, so this worker can't train ppo with {cfg.optimizer.type} yet"
+    )
+
+
 def make_env(cfg: cfglib.TrainConfig, num_envs: int) -> sprint.Sprint:
   env_cfg = sprint.default_config()
   env_cfg.impl = cfg.sim.impl
@@ -64,22 +74,22 @@ def make_env(cfg: cfglib.TrainConfig, num_envs: int) -> sprint.Sprint:
   env_cfg.sim_dt = cfg.sim.sim_dt
   env_cfg.episode_length = cfg.sim.episode_length
   env_cfg.naconmax = num_envs * CONTACTS_PER_WORLD
-  for name, weight in cfg.reward_weights.model_dump().items():
+  for name, weight in cfg.level.reward_weights.model_dump().items():
     env_cfg.reward_weights[name] = weight
   return sprint.Sprint(env_cfg)
 
 
-def make_network_factory(net: cfglib.NetworkConfig):
+def make_network_factory(brain: cfglib.MLPBrain):
   return functools.partial(
       ppo_networks.make_ppo_networks,
-      policy_hidden_layer_sizes=tuple(net.policy_hidden),
-      value_hidden_layer_sizes=tuple(net.value_hidden),
-      activation=ACTIVATION_FNS[net.activation],
+      policy_hidden_layer_sizes=tuple(brain.policy_hidden),
+      value_hidden_layer_sizes=tuple(brain.value_hidden),
+      activation=ACTIVATION_FNS[brain.activation],
   )
 
 
 def ppo_kwargs(cfg: cfglib.TrainConfig) -> dict[str, Any]:
-  p = cfg.ppo
+  p = cfg.trainer
   return dict(
       num_timesteps=p.num_timesteps,
       num_envs=p.num_envs,
@@ -87,7 +97,7 @@ def ppo_kwargs(cfg: cfglib.TrainConfig) -> dict[str, Any]:
       num_minibatches=p.num_minibatches,
       unroll_length=p.unroll_length,
       num_updates_per_batch=p.num_updates_per_batch,
-      learning_rate=p.learning_rate,
+      learning_rate=cfg.optimizer.learning_rate,
       discounting=p.discounting,
       entropy_cost=p.entropy_cost,
       clipping_epsilon=p.clipping_epsilon,
@@ -100,7 +110,7 @@ def ppo_kwargs(cfg: cfglib.TrainConfig) -> dict[str, Any]:
       num_resets_per_eval=0,
       deterministic_eval=True,
       seed=cfg.seed,
-      network_factory=make_network_factory(cfg.network),
+      network_factory=make_network_factory(cfg.brain),
       wrap_env_fn=wrapper.wrap_for_brax_training,
   )
 
@@ -183,6 +193,7 @@ def train(
     log: Callable[[str], None] = print,
 ) -> dict[str, Any]:
   """Trains one policy. Returns the train stats (also written to run_dir)."""
+  check_supported(cfg)
   require_gpu()
   run_dir = run_dir.resolve()  # orbax only accepts absolute checkpoint paths
   run_dir.mkdir(parents=True, exist_ok=True)
@@ -192,8 +203,8 @@ def train(
   metrics_path = run_dir / "metrics.jsonl"
   metrics_path.write_text("")
 
-  env = make_env(cfg, cfg.ppo.num_envs)
-  eval_env = make_env(cfg, cfg.ppo.num_eval_envs)
+  env = make_env(cfg, cfg.trainer.num_envs)
+  eval_env = make_env(cfg, cfg.trainer.num_eval_envs)
   kwargs = ppo_kwargs(cfg)
   dt = env.dt
 
@@ -228,9 +239,9 @@ def train(
     )
 
   ckpt_dir = run_dir / "checkpoints"
-  log(f"Training {cfg.level} on {jax.devices()[0].device_kind} "
-      f"(impl={cfg.sim.impl}, {cfg.ppo.num_envs} envs, "
-      f"{cfg.ppo.effective_timesteps:,} steps) -> {run_dir}")
+  log(f"Training {cfg.level.type} with {cfg.trainer.type} on {jax.devices()[0].device_kind} "
+      f"(impl={cfg.sim.impl}, {cfg.trainer.num_envs} envs, "
+      f"{cfg.trainer.effective_timesteps:,} steps) -> {run_dir}")
   COMPILE_TIMER.reset()
   COMPILE_TIMER.enabled = True
   make_inference_fn, params, _ = ppo.train(
@@ -250,17 +261,18 @@ def train(
     ckpt_config = ppo_checkpoint.network_config(
         observation_size=env.observation_size,
         action_size=env.action_size,
-        normalize_observations=cfg.ppo.normalize_observations,
+        normalize_observations=cfg.trainer.normalize_observations,
         network_factory=kwargs["network_factory"],
     )
     ppo_checkpoint.save(run_dir / "final", total_steps, params, ckpt_config)
 
-  timing = split_timing(progress_rows, cfg.ppo.env_steps_per_update)
+  timing = split_timing(progress_rows, cfg.trainer.env_steps_per_update)
   mem = jax.devices()[0].memory_stats() or {}
   stats = {
       "run_dir": str(run_dir),
       "config_hash": cfg.config_hash(),
-      "level": cfg.level,
+      "level": cfg.level.type,
+      "trainer": cfg.trainer.type,
       "seed": cfg.seed,
       "backend": cfg.sim.impl,
       "timesteps": total_steps,
@@ -336,7 +348,7 @@ def split_timing(rows: list[dict[str, Any]], steps_per_update: int) -> dict[str,
 
 def default_run_dir(cfg: cfglib.TrainConfig) -> Path:
   stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-  return RUNS_DIR / f"{stamp}-{cfg.level}-s{cfg.seed}"
+  return RUNS_DIR / f"{stamp}-{cfg.level.type}-s{cfg.seed}"
 
 
 def main() -> None:

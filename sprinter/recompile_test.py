@@ -39,12 +39,14 @@ def _worker(config_path: str, impl: str, cases: list[dict], cache_dir: str) -> N
   base = _load(config_path, impl)
   results = []
   for case in cases:
-    ppo_cfg = base.ppo.model_copy(update={
-        "num_timesteps": SHORT_UPDATES * base.ppo.env_steps_per_update,
+    trainer = base.trainer.model_copy(update={
+        "num_timesteps": SHORT_UPDATES * base.trainer.env_steps_per_update,
         "num_evals": 2,
-        "learning_rate": case["learning_rate"],
     })
-    cfg = base.model_copy(update={"ppo": ppo_cfg, "seed": case.get("seed", base.seed)})
+    optimizer = base.optimizer.model_copy(update={"learning_rate": case["learning_rate"]})
+    cfg = base.model_copy(update={
+        "trainer": trainer, "optimizer": optimizer, "seed": case.get("seed", base.seed),
+    })
     timer = trainlib.COMPILE_TIMER
     timer.reset()
     timer.enabled = True
@@ -55,8 +57,8 @@ def _worker(config_path: str, impl: str, cases: list[dict], cache_dir: str) -> N
       if step == 0:
         first_eval["s"] = round(time.monotonic() - t0, 1)
 
-    env = trainlib.make_env(cfg, cfg.ppo.num_envs)
-    eval_env = trainlib.make_env(cfg, cfg.ppo.num_eval_envs)
+    env = trainlib.make_env(cfg, cfg.trainer.num_envs)
+    eval_env = trainlib.make_env(cfg, cfg.trainer.num_eval_envs)
     ppo.train(environment=env, eval_env=eval_env, progress_fn=progress, **trainlib.ppo_kwargs(cfg))
     timer.enabled = False
     results.append({
@@ -89,7 +91,7 @@ def main() -> None:
     return
 
   cfg = _load(a.config, a.impl)
-  lr = cfg.ppo.learning_rate
+  lr = cfg.optimizer.learning_rate
   in_process = [
       {"case": "baseline", "learning_rate": lr},
       {"case": "same config again", "learning_rate": lr},
@@ -99,7 +101,7 @@ def main() -> None:
   try:
     report = {
         "impl": a.impl,
-        "short_training_steps": SHORT_UPDATES * cfg.ppo.env_steps_per_update,
+        "short_training_steps": SHORT_UPDATES * cfg.trainer.env_steps_per_update,
         "no_persistent_cache": _spawn(a.config, a.impl, in_process, ""),
         "persistent_cache_same_process": _spawn(a.config, a.impl, in_process, str(cache)),
         "persistent_cache_new_process": _spawn(
