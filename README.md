@@ -2,7 +2,8 @@
 
 Milestone 1 of a reinforcement-learning game. A planar humanoid ("Sprinter") learns to run
 from one JSON config, on one GPU, in about 10 minutes. Training uses a MuJoCo Playground
-environment and Brax PPO on JAX, with the MuJoCo Warp physics backend.
+environment and Brax PPO on JAX, with the MuJoCo Warp physics backend. The game's levels,
+eras and trainers are designed in [docs/game-design.md](docs/game-design.md).
 
 The config file is the contract the future app server will send to a GPU worker. Training
 streams one line per evaluation to `metrics.jsonl` (the future live-stats feed). Each run
@@ -294,6 +295,7 @@ short run); they are kept for stability as Playground recommends for Ampere GPUs
 
 ```
 configs/sprint_default.json   default config (the app's contract)
+docs/game-design.md           level lineup, eras and trainer decisions
 sprinter/
   assets/humanoid2d.xml       the humanoid and the scene
   envs/sprint.py              Sprint environment (MuJoCo Playground MjxEnv)
