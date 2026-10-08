@@ -165,8 +165,165 @@ These are decided on their own cards, not here.
 
 ## Unlock rules
 
-_To be written in [#6] (unlock at 80% of a tuned reference score). The reference scores and
-thresholds come from [#7]._
+On each level, a trainer unlocks the next one when a player's run with it scores at least 80%
+of that trainer's reference score on that level:
+
+> **unlock when run score ≥ 0.8 × reference(level, trainer)**
+
+The reference is the best score the team can show the trainer reaching on that level when it
+is well tuned, at the same budget a player's run gets. A run at 80% of it has used most of what
+the trainer can do, so further gains need the next trainer. That is the wall the player hits
+before each unlock.
+
+This section fixes the rule and its terms ([#6]). The reference scores and thresholds are
+measured in [#7].
+
+### The score
+
+The unlock reads the level's score, the same score its pass bar uses:
+
+| Level | Score |
+|---|---|
+| Crawl | Set in the design sheet on [#10] |
+| Jump | Set in the design sheet on [#11] |
+| Walk | Set in the design sheet on [#12] |
+| Sprint | Distance covered in 10 s, in meters |
+
+Climb Steps ([#13]) and Backflip ([#14]) have a single trainer, so they have no unlock.
+
+* The score is always measured in the simulation. It is never a trainer's own number: not the
+  copy trainer's imitation loss, an evolution trainer's fitness or the RL reward. So every
+  trainer on a level is judged on the same scale.
+* Higher is better, and a runner that does nothing scores 0: distance from the start, height
+  gained above standing. Otherwise 80% of the reference can be reached without learning
+  anything. If Jump scored the torso's peak height instead of the height gained, a runner that
+  stood still would already be most of the way there. Each level's design sheet has to define
+  its score this way.
+
+### Which result counts
+
+* **One run's final evaluation.** The score is taken from the `eval.json` of a single training
+  run: 10 deterministic episodes of the brain the run ends with (for an evolution trainer, the
+  best candidate it found). On Sprint it is `distance_m.mean`, and an episode that ends in a
+  fall counts the distance covered before the fall. So falls lower the score. `summary.json`'s
+  `level_score_m` is a different number, the distance of the one replayed (median) episode,
+  and the unlock does not use it.
+* Not a checkpoint from partway through training, not the evals logged during training, and not
+  a mean over several of the player's runs. Each run is checked on its own when it finishes,
+  and a player can make as many runs as they like.
+* The run uses the trainer and brain the level gives at that point, with any settings the block
+  editor allows. A shorter run than the budget is allowed and is held to the same threshold.
+* The unlock reads only the score. Sprint's gait checks are part of its pass bar, not of the
+  unlock: a hacked gait that covers the distance has still pushed the trainer that far.
+* Unlocks are per player and permanent.
+
+### How a reference score is measured
+
+| | Rule |
+|---|---|
+| Tuning | As much as the team wants, but only through settings a player can set in the block editor, within the config schema's ranges (network, trainer settings, reward weights). No code changes. |
+| Budget | The same as a player's run ([below](#the-budget)). Every run in the tuning sweep gets that budget; the sweep's total cost does not count. |
+| Seeds | Tune on any seeds, then rerun the chosen settings on 5 fresh seeds that the tuning never used. |
+| Statistic | The mean of the 5 runs' scores, each from its own final `eval.json`: the same number a player's run is judged on. |
+
+* **Only settings a player can reach**, so every reference is a score a player could get. If the
+  team needs a setting the editor lacks, the editor gets it or the reference goes without.
+* **Fresh seeds.** The best of many settings tried on the same seeds is partly seed luck, so its
+  score overstates what those settings do. Rerunning them on new seeds removes that.
+* **The mean, not the best seed.** A player's run is one seed. Measured from a mean, the 20%
+  margin covers most of the spread between seeds; measured from the best seed, it does not. The
+  milestone 1 Sprint runs ([README](../README.md#results-rtx-3070-wsl2); default settings, not
+  tuned, 3 seeds) show it: 58.2, 67.9 and 47.0 m. Against the mean, the threshold is
+  0.8 × 57.7 = 46.2 m, and all three runs clear it. Against the best seed it is
+  0.8 × 67.9 = 54.3 m, and seed 2 misses with the same settings.
+* The tuned settings are checked in as config files ([#7]) so every reference can be rerun.
+* A reference belongs to one version of its level. A change to the level's environment, score,
+  brain, editor ranges or budget means remeasuring the references on that level.
+
+### The budget
+
+A player's run and every reference run get the same budget: a maximum training length per
+trainer, sized so that a run takes about 10 minutes on the reference GPU (the RTX 3070 in WSL2,
+with the Warp backend). Sprint's default PPO config is this size today: 58,982,400 steps in
+10.4-10.5 minutes, compile included.
+
+* **Counted in steps, not minutes**, in each trainer's own unit: environment steps for
+  REINFORCE and PPO, generations for the evolution trainers, and gradient steps for the copy
+  trainer. The server enforces the step cap, not the clock. A faster or slower server GPU then
+  finishes sooner or later but reaches the same score, so the references stay valid when the
+  server's GPU changes.
+* Settings that make each step slower, such as a bigger network, make a run take longer but
+  not train further. The editor's limits bound how much longer.
+* The caps are set per trainer from the timings in the spike ([#9]), which runs at the same
+  10 minutes, and stored with the references ([below](#where-the-numbers-live)). Today's Sprint
+  schema allows `num_timesteps` up to 500 million; config contract v2 lowers that to the cap.
+* Without the same budget, 80% of the reference may be out of reach: a reference trained for
+  an hour would hold a 10-minute run to a score it cannot get.
+
+### Unlocking a trainer vs passing a level
+
+| | Unlock threshold | Pass bar |
+|---|---|---|
+| What it opens | The next trainer on the same level | The next level |
+| Measured against | The trainer in use: 0.8 × its reference | One absolute bar per level, the same for every trainer |
+| Set in | This section and [#7] | The level's design sheet. Sprint: at least 20 m in 10 s without falling in 8 of 10 episodes, plus the gait checks in `sprinter/evaluate.py` |
+| What it checks | The score only | The score, plus any other checks the sheet adds |
+
+* Every finished run is checked against both. A run can unlock without passing, which is the
+  usual case for a level's early trainers, or pass without unlocking.
+* **Passing a level unlocks every trainer on it** that the player has not unlocked yet. The next
+  level then always starts with the trainer the lineup lists (PSO on Jump, the copycat on
+  Sprint).
+* So passing early skips the remaining unlocks. To keep the usual path through every trainer, a
+  level's pass bar should sit above the unlock thresholds of its earlier trainers, so a player
+  whose scores climb toward the bar meets the next trainer first. Each design sheet checks its
+  bar against the table below once [#7] has the numbers.
+* **Once the last trainer on a level is unlocked**, nothing more unlocks there. The player keeps
+  training toward the pass bar and their own best score. On Climb Steps and Backflip that is the
+  whole level. When the last trainer carries over to the next level (PSO from Crawl to Jump), it
+  has a separate reference there: references are per level and trainer.
+
+### Unlock table
+
+| Level | Trainer | Unlocks | Reference score | Threshold (0.8 × reference) |
+|---|---|---|---|---|
+| Crawl | Hill climbing | GA | TBD | TBD |
+| Crawl | GA | PSO | TBD | TBD |
+| Crawl | PSO | — (last on the level) | TBD | — |
+| Jump | PSO | CMA-ES | TBD | TBD |
+| Jump | CMA-ES | — (last on the level) | TBD | — |
+| Walk | Copy trainer with SGD | RMSprop | TBD | TBD |
+| Walk | Copy trainer with RMSprop | Adam | TBD | TBD |
+| Walk | Copy trainer with Adam | — (last on the level) | TBD | — |
+| Sprint | The copycat | REINFORCE | TBD | TBD |
+| Sprint | REINFORCE | PPO | TBD | TBD |
+| Sprint | PPO | — (last on the level) | TBD | — |
+| Climb Steps | PPO | — (single trainer) | — | — |
+| Backflip | PPO | — (single trainer) | — | — |
+
+* The last trainer on each level unlocks nothing, but it gets a reference too, so [#8] can check
+  that every unlock is a clear step up: the next trainer's reference well above the current
+  one's.
+* If TRPO ([#15]) is built, it gets a row between REINFORCE and PPO. SAC ([#16]) stays off the
+  main path and gets no row unless it becomes an unlock.
+* Lineup changes from [#8] update this table.
+
+### Where the numbers live
+
+`configs/unlocks.json` is the only store of the reference scores and thresholds. [#7] creates it
+with the first measured references. The server loads it and sends it to the app, and the app's
+unlock engine uses what the server sent; the app keeps no copy of its own. The table above
+mirrors the file, and when they disagree, the file is right.
+
+The file holds:
+
+* `fraction`: 0.8, stored once, so changing the rule is one edit.
+* One entry per level and trainer: the trainer it unlocks, the reference score, the threshold,
+  the 5 seeds and their scores, the step cap it was measured at (the same cap the server
+  enforces on player runs), the path to the tuned config, and the commit it was measured at.
+* The threshold is stored, not only computed, so the server and the app can never round it
+  differently. A schema in `sprinter/` validates the file, and a test checks that each
+  threshold is `fraction` × reference, rounded to 2 decimals like the scores in `eval.json`.
 
 [#4]: https://github.com/BrockBadeaux14/FirstSteps/issues/4
 [#6]: https://github.com/BrockBadeaux14/FirstSteps/issues/6
